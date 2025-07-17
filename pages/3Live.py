@@ -66,15 +66,21 @@ def parse_sensor_data(text):
 # ==================== SIMPAN KE GOOGLE SHEET ====================
 def save_to_google_sheet(data):
     row_key = f"{data['tanggal']} {data['waktu']}"
-    if row_key in data_cache:
-        return  # Hindari duplikat
-    data_cache.add(row_key)
+    
+    # Cek baris terakhir di Google Sheet
+    last_row = sheet.get_all_values()[-1]  # Ambil baris terakhir
+    last_key = f"{last_row[0]} {last_row[1]}"  # Asumsikan kolom 0=tanggal, 1=waktu
+
+    if row_key == last_key:
+        return  # Sudah disimpan sebelumnya
+    
     row = [
         data.get("tanggal"), data.get("waktu"), data.get("temp"),
         data.get("kelembaban"), data.get("w_speed"), data.get("w_dir"),
         data.get("press"), data.get("hujan"), data.get("rad"), data.get("signal")
     ]
     sheet.append_row(row)
+
 
 # ==================== MQTT CALLBACK ====================
 def on_message(client, userdata, msg):
