@@ -65,21 +65,26 @@ def parse_sensor_data(text):
 
 # ==================== SIMPAN KE GOOGLE SHEET ====================
 def save_to_google_sheet(data):
-    row_key = f"{data['tanggal']} {data['waktu']}"
-    
-    # Cek baris terakhir di Google Sheet
-    last_row = sheet.get_all_values()[-1]  # Ambil baris terakhir
-    last_key = f"{last_row[0]} {last_row[1]}"  # Asumsikan kolom 0=tanggal, 1=waktu
+    try:
+        current_row = [
+            str(data.get("tanggal")), str(data.get("waktu")), str(data.get("temp")),
+            str(data.get("kelembaban")), str(data.get("w_speed")), str(data.get("w_dir")),
+            str(data.get("press")), str(data.get("hujan")), str(data.get("rad")), str(data.get("signal"))
+        ]
 
-    if row_key == last_key:
-        return  # Sudah disimpan sebelumnya
-    
-    row = [
-        data.get("tanggal"), data.get("waktu"), data.get("temp"),
-        data.get("kelembaban"), data.get("w_speed"), data.get("w_dir"),
-        data.get("press"), data.get("hujan"), data.get("rad"), data.get("signal")
-    ]
-    sheet.append_row(row)
+        # Ambil semua data dari sheet
+        all_rows = sheet.get_all_values()
+        if all_rows:
+            last_row = all_rows[-1]
+            if current_row == last_row:
+                return  # ⛔ Duplikat, jangan simpan
+
+        # ✅ Tidak duplikat → simpan ke sheet
+        sheet.append_row(current_row)
+
+    except Exception as e:
+        print(f"Gagal menyimpan ke Google Sheet: {e}")
+
 
 
 # ==================== MQTT CALLBACK ====================
