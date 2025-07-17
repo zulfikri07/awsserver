@@ -15,6 +15,13 @@ MQTT_BROKER = "mqtt-dashboard.com"
 MQTT_PORT = 1883
 MQTT_TOPIC = "AWS@port"
 
+st.set_page_config(page_title="Data_Live", layout="wide")
+st.title("LIVE DATA MONITORING AWS")
+st.caption(f"Topik MQTT: {MQTT_TOPIC}")
+st.sidebar.image("pages/logommi.jpeg")
+placeholder = st.empty()
+
+
 # Setup koneksi Google Sheets
 scope = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -90,12 +97,6 @@ if "mqtt_started" not in st.session_state:
     threading.Thread(target=mqtt_thread, daemon=True).start()
     st.session_state["mqtt_started"] = True
 
-st.set_page_config(page_title="Data_Live", layout="wide")
-st.title("LIVE DATA MONITORING AWS")
-st.caption(f"Topik MQTT: {MQTT_TOPIC}")
-st.sidebar.image("pages/logommi.jpeg")
-
-placeholder = st.empty()
 
 # Tambahkan header jika belum ada (cek kolom pertama)
 if len(sheet.row_values(1)) < 10:
