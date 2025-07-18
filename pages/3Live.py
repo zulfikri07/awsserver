@@ -9,6 +9,9 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
+from streamlit_autorefresh import st_autorefresh
+
+
 
 # ==================== KONFIGURASI MQTT ====================
 MQTT_BROKER = "mqtt-dashboard.com"
@@ -16,37 +19,42 @@ MQTT_PORT = 1883
 MQTT_TOPIC = "AWS@port"
 
 st.set_page_config(page_title="Data_Live", layout="wide")
+
+# 🔁 Tambahkan auto-refresh setiap 5 menit (300.000 ms)
+st_autorefresh(interval=300000, key="auto_refresh_5min")
+
 st.title("LIVE DATA MONITORING AWS")
 st.caption(f"Topik MQTT: {MQTT_TOPIC}")
 st.sidebar.image("pages/logommi.jpeg")
+
+# Tombol manual refresh
+if st.button("🔄 Perbarui Data"):
+    st.rerun()
+
 placeholder = st.empty()
 
-
-# Setup koneksi Google Sheets
+# ==================== GOOGLE SHEET ====================
 scope = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
-
 credentials_dict = dict(st.secrets["gcp_service_account"])
-credentials_dict["private_key"] = credentials_dict["private_key"].replace("\\n", "\n")  # ← ini WAJIB
+credentials_dict["private_key"] = credentials_dict["private_key"].replace("\\n", "\n")
 creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
 sheet_client = gspread.authorize(creds)
+spreadsheet = sheet_client.open("server")
+sheet = spreadsheet.sheet1
 
-
-# Buka spreadsheet
-spreadsheet = sheet_client.open("server")  # Nama Google Sheet
-sheet = spreadsheet.sheet1  # Atau pakai .worksheet("NamaSheet")
-
-# ==================== GLOBAL DATA ====================
+# ==================== GLOBAL VARIABEL ====================
 mqtt_data = {"message": "Menunggu data..."}
-data_cache = set()  # Hindari duplikat
+last_saved_date = None
+last_saved_row = None
+last_saved_time = 0  # Epoch time
 
-# ==================== PARSE DATA ====================
+# ==================== PARSE DATA MQTT ====================
 def parse_sensor_data(text):
     try:
         data = {}
-        # Ambil waktu dan tanggal
         time_match = re.search(r'(\d{2}:\d{2}:\d{2}) (\d{2}-\d{2}-\d{4})', text)
         if time_match:
             data["waktu"] = time_match.group(1)
@@ -65,56 +73,40 @@ def parse_sensor_data(text):
 
 # ==================== SIMPAN KE GOOGLE SHEET ====================
 def save_to_google_sheet(data):
+    global last_saved_row, last_saved_date, last_saved_time
     try:
+        current_date = data.get("tanggal")
+
+        # Reset hujan saat ganti hari
+        if last_saved_date != current_date:
+            last_saved_date = current_date
+            data["hujan"] = 0.0  # Set hujan ke 0 jika hari berganti
+
+        # Format baris data
         current_row = [
-            str(data.get("tanggal")), str(data.get("waktu")), str(data.get("temp")),
-            str(data.get("kelembaban")), str(data.get("w_speed")), str(data.get("w_dir")),
-            str(data.get("press")), str(data.get("hujan")), str(data.get("rad")), str(data.get("signal"))
+            str(data.get("tanggal")).strip(), str(data.get("waktu")).strip(),
+            f"{data.get('temp'):.1f}", str(data.get("kelembaban")),
+            f"{data.get('w_speed'):.1f}", str(data.get("w_dir")),
+            f"{data.get('press'):.1f}", f"{data.get('hujan'):.1f}",
+            f"{data.get('rad'):.1f}", str(data.get("signal"))
         ]
 
-        # Ambil semua data dari sheet
-        all_rows = sheet.get_all_values()
-        if all_rows:
-            last_row = all_rows[-1]
-            if current_row == last_row:
-                return  # ⛔ Duplikat, jangan simpan
+        now = time.time()
+        elapsed = now - last_saved_time
 
-        # ✅ Tidak duplikat → simpan ke sheet
-        sheet.append_row(current_row)
+        # Simpan jika data berbeda dari sebelumnya atau sudah lebih dari 60 detik
+        if current_row != last_saved_row or elapsed > 60:
+            sheet.append_row(current_row)
+            last_saved_row = current_row
+            last_saved_time = now
+        else:
+            print("⛔ Duplikat atau terlalu cepat, tidak disimpan")
 
     except Exception as e:
         print(f"Gagal menyimpan ke Google Sheet: {e}")
 
 
-
-# ==================== MQTT CALLBACK ====================
-def on_message(client, userdata, msg):
-    payload = msg.payload.decode()
-    parsed = parse_sensor_data(payload)
-    mqtt_data.clear()
-    mqtt_data.update(parsed)
-    if "error" not in parsed:
-        save_to_google_sheet(parsed)
-
-def mqtt_thread():
-    client = mqtt.Client()
-    client.on_message = on_message
-    client.connect(MQTT_BROKER, MQTT_PORT, 60)
-    client.subscribe(MQTT_TOPIC)
-    client.loop_forever()
-
-# ==================== STREAMLIT START ====================
-if "mqtt_started" not in st.session_state:
-    threading.Thread(target=mqtt_thread, daemon=True).start()
-    st.session_state["mqtt_started"] = True
-
-
-# Tambahkan header jika belum ada (cek kolom pertama)
-if len(sheet.row_values(1)) < 10:
-    headers = ["Tanggal", "Waktu", "Suhu", "Kelembaban", "W.Speed", "W.Dir", "Tekanan", "Hujan", "Rad", "Signal"]
-    sheet.insert_row(headers, 1)
-
-# Tambahkan CSS untuk desain kartu yang menarik
+# ==================== STYLE ====================
 st.markdown("""
     <style>
         .card {
@@ -145,39 +137,71 @@ def display_card(title, value, satuan="", icon=""):
         </div>
     """
 
-while True:
+# Ambil baris terakhir dari Google Sheet
+def get_latest_row():
+    rows = sheet.get_all_values()
+    if len(rows) > 1:
+        return rows[-1]
+    return None
+
+# Simpan baris terakhir di session_state agar bisa dibandingkan
+if "last_row" not in st.session_state:
+    st.session_state["last_row"] = None
+
+# Ambil data baru
+latest_row = get_latest_row()
+
+# Jika data berubah, tampilkan
+if latest_row and latest_row != st.session_state["last_row"]:
+    st.session_state["last_row"] = latest_row  # update session
+
+    # Parsing data
+    latest_data = {
+        "tanggal": latest_row[0],
+        "waktu": latest_row[1],
+        "temp": float(latest_row[2]),
+        "kelembaban": int(latest_row[3]),
+        "w_speed": float(latest_row[4]),
+        "w_dir": int(latest_row[5]),
+        "press": float(latest_row[6]),
+        "hujan": float(latest_row[7]),
+        "rad": float(latest_row[8]),
+        "signal": int(latest_row[9]),
+    }
+
+    # ===================== TAMPILKAN DATA =====================
     with placeholder.container():
-        if "error" in mqtt_data:
-            st.error(f"❌ Parsing Error: {mqtt_data['error']}")
-        else:
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.markdown(display_card("Waktu", mqtt_data.get("waktu", "-"), "", "🕒"), unsafe_allow_html=True)
-            with col2:
-                st.markdown(display_card("Tanggal", mqtt_data.get("tanggal", "-"), "", "📅"), unsafe_allow_html=True)
-            with col3:
-                st.markdown(display_card("Signal", mqtt_data.get("signal", "-"), "", "📶"), unsafe_allow_html=True)
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(display_card("Waktu", latest_data["waktu"], "", "🕒"), unsafe_allow_html=True)
+        with col2:
+            st.markdown(display_card("Tanggal", latest_data["tanggal"], "", "📅"), unsafe_allow_html=True)
+        with col3:
+            st.markdown(display_card("Signal", latest_data["signal"], "", "📶"), unsafe_allow_html=True)
 
-            st.divider()
+        st.divider()
 
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.markdown(display_card("Suhu", mqtt_data.get("temp", "-"), "°C", "🌡️"), unsafe_allow_html=True)
-            with col2:
-                st.markdown(display_card("Kelembaban", mqtt_data.get("kelembaban", "-"), "%", "💧"), unsafe_allow_html=True)
-            with col3:
-                st.markdown(display_card("Curah Hujan", mqtt_data.get("hujan", "-"), "mm", "🌧️"), unsafe_allow_html=True)
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(display_card("Suhu", latest_data["temp"], "°C", "🌡️"), unsafe_allow_html=True)
+        with col2:
+            st.markdown(display_card("Kelembaban", latest_data["kelembaban"], "%", "💧"), unsafe_allow_html=True)
+        with col3:
+            st.markdown(display_card("Curah Hujan", latest_data["hujan"], "mm", "🌧️"), unsafe_allow_html=True)
 
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.markdown(display_card("Kecepatan Angin", mqtt_data.get("w_speed", "-"), "m/s", "💨"), unsafe_allow_html=True)
-            with col2:
-                st.markdown(display_card("Arah Angin", mqtt_data.get("w_dir", "-"), "°", "🧭"), unsafe_allow_html=True)
-            with col3:
-                st.markdown(display_card("Tekanan", mqtt_data.get("press", "-"), "hPa", "📈"), unsafe_allow_html=True)
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(display_card("Kecepatan Angin", latest_data["w_speed"], "m/s", "💨"), unsafe_allow_html=True)
+        with col2:
+            st.markdown(display_card("Arah Angin", latest_data["w_dir"], "°", "🧭"), unsafe_allow_html=True)
+        with col3:
+            st.markdown(display_card("Tekanan", latest_data["press"], "hPa", "📈"), unsafe_allow_html=True)
 
-            col1, _, col3 = st.columns([1,1,1])
-            with col1:
-                st.markdown(display_card("Radiasi", mqtt_data.get("rad", "-"), "W/m²", "☀️"), unsafe_allow_html=True)
-    time.sleep(1)
+        col1, _, col3 = st.columns([1, 1, 1])
+        with col1:
+            st.markdown(display_card("Radiasi", latest_data["rad"], "W/m²", "☀️"), unsafe_allow_html=True)
 
+    st.caption(f"⏱️ Terakhir diperbarui: {latest_data['tanggal']} {latest_data['waktu']}")
+
+else:
+    st.info("📌 Belum ada data baru dari Google Sheet. Tekan tombol di atas untuk memperbarui.")
