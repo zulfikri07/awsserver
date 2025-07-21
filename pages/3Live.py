@@ -47,8 +47,6 @@ sheet = spreadsheet.sheet1
 
 # ==================== GLOBAL VARIABEL ====================
 mqtt_data = {"message": "Menunggu data..."}
-last_saved_date = None
-last_saved_row = None
 last_saved_time = 0  # Epoch time
 
 # ==================== PARSE DATA MQTT ====================
@@ -95,7 +93,7 @@ def save_to_google_sheet(data):
         elapsed = now - last_saved_time
 
         # Simpan jika data berbeda dari sebelumnya atau sudah lebih dari 60 detik
-        if current_row != last_saved_row or elapsed > 60:
+        if current_row != last_saved_row and elapsed > 60:
             sheet.append_row(current_row)
             last_saved_row = current_row
             last_saved_time = now
