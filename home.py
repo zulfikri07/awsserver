@@ -80,12 +80,12 @@ creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope
 client = gspread.authorize(creds)
 
 # Ambil data dari sheet
-sheet = client.open("server").sheet1
+sheet = client.open("servernew").sheet1
 data = sheet.get_all_records()
 df = pd.DataFrame(data)
 
 # Konversi kolom angka desimal dari string dengan koma menjadi float
-kolom_angka = ['Suhu', 'Kelembaban', 'W.Speed', 'Tekanan', 'Rad', 'Signal']  # Sesuaikan nama kolom
+kolom_angka = ['Suhu', 'Kelembapan', 'W_Speed', 'W_Dir','Tekanan', 'Rad', 'Signal']  # Sesuaikan nama kolom
 
 for kolom in kolom_angka:
     if kolom in df.columns:
@@ -101,7 +101,7 @@ df['Waktu'] = df['Waktu'].astype(str)
 df['Datetime'] = pd.to_datetime(df['Tanggal'] + ' ' + df['Waktu'], format="%d-%m-%Y %H:%M:%S")
 
 # Pilih parameter
-parameter_list = ['Suhu', 'Kelembaban', 'W.Speed', 'W.Dir', 'Tekanan', 'Hujan', 'Rad', 'Signal']
+parameter_list = ['Suhu', 'Kelembapan', 'W_Speed', 'W_Dir', 'Tekanan', 'Hujan', 'Rad', 'Signal']
 selected = st.multiselect("Pilih Parameter yang Ditampilkan", parameter_list, default=['Suhu'])
 
 # Tampilkan grafik satu per satu
@@ -129,8 +129,8 @@ end_date = st.sidebar.date_input("Sampai", max_date)
 df_filtered = df[(df['Datetime'].dt.date >= start_date) & (df['Datetime'].dt.date <= end_date)]
 
 # --- PILIH PARAMETER ---
-parameter_list = ['Suhu', 'Kelembaban', 'W.Speed', 'W.Dir', 'Tekanan', 'Hujan', 'Rad', 'Signal']
-selected = st.multiselect("📌 Pilih Parameter", parameter_list, default=['Kelembaban'])
+parameter_list = ['Suhu', 'Kelembapan', 'W_Speed', 'W_Dir', 'Tekanan', 'Hujan', 'Rad', 'Signal']
+selected = st.multiselect("📌 Pilih Parameter", parameter_list, default=['Hujan'])
 
 if selected and not df_filtered.empty:
     for param in selected:
